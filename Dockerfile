@@ -1,9 +1,9 @@
 FROM node:20-alpine AS frontend
 
 WORKDIR /app
-
-COPY Wrestling/package*.json ./
-RUN npm install --no-audit --no-fund
+estling/package*.json ./
+RUN npm i
+COPY Wrnstall --no-audit --no-fund
 
 COPY Wrestling/public ./public
 COPY Wrestling/src ./src
