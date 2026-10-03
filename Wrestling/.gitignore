@@ -1,0 +1,10 @@
+node_modules/
+build/
+coverage/
+coverage.out
+playwright-report/
+test-results/
+server-go/bin/
+*.log
+.DS_Store
+.env

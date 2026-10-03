@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: wrestling
+      POSTGRES_USER: wrestling
+      POSTGRES_PASSWORD: wrestling
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wrestling -d wrestling"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  wrestling:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://wrestling:wrestling@postgres:5432/wrestling?sslmode=disable"
+      CORS_ORIGINS: "http://localhost:8080"
+      OPENAPI_FILE: "/app/openapi.yaml"
+      DB_MAX_CONNS: "20"
+      DB_MIN_CONNS: "2"
+      YOUTUBE_API_KEY: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
