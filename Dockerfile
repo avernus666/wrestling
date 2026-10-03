@@ -7,7 +7,6 @@ RUN npm install --no-audit --no-fund
 
 COPY Wrestling/public ./public
 COPY Wrestling/src ./src
-COPY Wrestling/scripts ./scripts
 
 RUN npm run build
 
@@ -33,7 +32,7 @@ WORKDIR /app
 
 COPY --from=backend /out/wrestling ./wrestling
 COPY --from=frontend /app/build ./build
-COPY Wrestling/public/images ./public/images
+COPY --from=frontend /app/public ./public
 COPY Wrestling/openapi.yaml ./openapi.yaml
 
 ENV OPENAPI_FILE=/app/openapi.yaml
