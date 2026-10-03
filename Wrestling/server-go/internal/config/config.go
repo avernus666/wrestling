@@ -47,12 +47,12 @@ func stringEnv(key, fallback string) string {
 	}
 	return fallback
 }
-func int32Env(key string, fallback int) int {
-	value, err := strconv.Atoi(os.Getenv(key))
-	if err == nil && value > 0 {
-		return value
-	}
-	return fallback
+func int32Env(key string, fallback int32) int32 {
+ value, err := strconv.ParseInt(os.Getenv(key), 10, 32)
+ if err == nil && value > 0 {
+  return int32(value)
+ }
+ return fallback
 }
 func durationEnv(key string, fallback time.Duration) time.Duration {
 	if value, err := time.ParseDuration(os.Getenv(key)); err == nil && value > 0 {

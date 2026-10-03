@@ -78,7 +78,7 @@ func (r *UserRepository) CreateWorkout(ctx context.Context, userID, goal string,
 	if err != nil {
 		return models.WorkoutSession{}, err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 	id := newID()
 	now := time.Now().UTC()
 	var w models.WorkoutSession
@@ -101,7 +101,7 @@ func (r *UserRepository) CompleteWorkout(ctx context.Context, userID, sessionID 
 	if err != nil {
 		return models.WorkoutSession{}, err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 	var w models.WorkoutSession
 	err = tx.QueryRow(ctx, `SELECT id,goal,duration_minutes,equipment,started_at,total_exercises,completed_exercises FROM workout_sessions WHERE id=$1 AND user_id=$2 FOR UPDATE`, sessionID, userID).Scan(&w.ID, &w.Goal, &w.DurationMinutes, &w.Equipment, &w.StartedAt, &w.TotalExercises, &w.CompletedExercises)
 	if err != nil {

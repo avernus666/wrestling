@@ -116,4 +116,3 @@ func (s *UserService) SetSkill(ctx context.Context, userID, key string, level in
 	return s.repo.SetSkill(ctx, userID, key, level)
 }
 
-var _ = pgx.ErrNoRows
