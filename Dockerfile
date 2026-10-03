@@ -14,10 +14,8 @@ FROM golang:1.23-alpine AS backend
 
 WORKDIR /src
 
-COPY Wrestling/server-go/go.mod ./server-go/
-RUN cd server-go && go mod download
-
 COPY Wrestling/server-go ./server-go
+RUN cd server-go && go mod tidy
 
 RUN cd server-go && \
     CGO_ENABLED=0 \
