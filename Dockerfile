@@ -5,6 +5,9 @@ COPY Wrestling/package*.json ./
 RUN npm install --no-audit --no-fund
 
 COPY Wrestling/ ./
+
+RUN sed -i "s|background-image:url('/wrestling-japan.png');||g" src/styles.css
+
 RUN npm run build
 
 FROM golang:1.23-alpine AS backend
