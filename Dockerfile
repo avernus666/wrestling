@@ -11,9 +11,8 @@ FROM golang:1.23-alpine AS backend
 WORKDIR /src/server-go
 
 COPY Wrestling/server-go/go.mod ./
-RUN go mod tidy
-
 COPY Wrestling/server-go/ ./
+RUN go mod tidy
 
 RUN CGO_ENABLED=0 \
     go build -trimpath \
