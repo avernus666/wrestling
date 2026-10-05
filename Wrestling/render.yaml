@@ -4,7 +4,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    repo: https://github.com/avernus666/wrestling-
+    repo: https://github.com/avernus666/wrestling
     branch: main
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/ready

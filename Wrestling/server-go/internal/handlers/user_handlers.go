@@ -6,12 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 	"wrestling/internal/models"
 	"wrestling/internal/services"
 )
@@ -291,7 +288,7 @@ func (h *Handler) CommunityComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		methodNotAllowed(w, http.MethodGet)
+		respondError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
 		return
 	}
 	u, ok := h.authUser(r)

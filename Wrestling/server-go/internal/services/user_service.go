@@ -115,4 +115,3 @@ func (s *UserService) Skills(ctx context.Context, userID string) ([]models.Skill
 func (s *UserService) SetSkill(ctx context.Context, userID, key string, level int) error {
 	return s.repo.SetSkill(ctx, userID, key, level)
 }
-
