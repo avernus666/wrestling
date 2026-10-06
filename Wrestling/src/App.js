@@ -9,7 +9,7 @@ const imageSearch = q => `https://www.google.com/search?tbm=isch&q=${encodeURICo
 
 function load(key){ try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; } }
 
-function App(){
+export default function App(){
   const [page,setPage] = useState('главная');
   const [filters,setFilters] = useState({group:'Все',level:'Все'});
   const [query,setQuery] = useState('');
@@ -22,47 +22,170 @@ function App(){
   const [readinessDone,setReadinessDone] = useState(() => load('wrestling-readiness'));
   const [menuOpen,setMenuOpen] = useState(false);
 
-  const toggle = (key,setter,storage) => setter(prev => { const next = prev.includes(key) ? prev.filter(x=>x!==key) : [...prev,key]; localStorage.setItem(storage,JSON.stringify(next)); return next; });
-  const active = categories.find(c=>c.id===page);
+  const toggle=(key,setter,storage)=>setter(prev=>{const next=prev.includes(key)?prev.filter(x=>x!==key):[...prev,key];localStorage.setItem(storage,JSON.stringify(next));return next;});
+  const active=categories.find(c=>c.id===page);
+  const items=useMemo(()=>{
+    if(!active)return[];
 
-  const items = useMemo(() => {
-    if(!active) return [];
-    return active.groups.flatMap(g=>g.items.map(([name,level,english,text,lesson])=>({name,level,english,text,lesson,group:g.title,jp:g.jp,video:youtube(english),image:imageSearch(english),media:{video:youtube(english),image:imageSearch(english),status:'external-search'}})))
-      .filter(x => (filters.group==='Все' || x.group===filters.group) && (filters.level==='Все' || x.level===filters.level))
-      .filter(x => !query || `${x.name} ${x.english} ${x.group}`.toLowerCase().includes(query.toLowerCase()));
+    const normalize = value => String(value ?? '')
+      .toLowerCase()
+      .replace(/ё/g,'е')
+      .normalize('NFD')
+      .replace(/[\\u0300-\\u036f]/g,'')
+      .replace(/[^a-zа-я0-9]+/gi,' ')
+      .trim();
+
+    const distance = (a,b) => {
+      if(a===b)return 0;
+      if(!a)return b.length;
+      if(!b)return a.length;
+      const prev=Array.from({length:b.length+1},(_,i)=>i);
+      for(let i=1;i<=a.length;i++){
+        let left=i;
+        for(let j=1;j<=b.length;j++){
+          const up=prev[j];
+          const cost=a[i-1]===b[j-1]?0:1;
+          prev[j]=Math.min(prev[j]+1,left+1,prev[j-1]+cost);
+          left=up;
+        }
+      }
+      return prev[b.length];
+    };
+
+    const searchable = active.groups.flatMap(g=>g.items.map(([name,level,english,text,lesson])=>({
+      name,level,english,text,lesson,group:g.title,jp:g.jp,
+      video:youtube(english),image:imageSearch(english)
+    })));
+
+    const filtered=searchable.filter(x=>
+      (filters.group==='Все'||x.group===filters.group) &&
+      (filters.level==='Все'||x.level===filters.level)
+    );
+
+    const q=normalize(query);
+    if(!q)return filtered;
+
+    const words=q.split(/\\s+/).filter(Boolean);
+
+    return filtered
+      .map(item=>{
+        const fields=[
+          [normalize(item.name),120],
+          [normalize(item.english),95],
+          [normalize(item.group),70],
+          [normalize(item.level),55],
+          [normalize(item.text),45],
+          [normalize(item.lesson),35],
+          [normalize(item.jp),25]
+        ];
+        const full=fields.map(([v])=>v).join(' ');
+        let score=0;
+
+        if(full===q)score+=300;
+        if(full.includes(q))score+=180;
+
+        for(const word of words){
+          let best=0;
+          for(const [value,weight] of fields){
+            if(!value)continue;
+            if(value===word)best=Math.max(best,weight+70);
+            else if(value.split(' ').some(token=>token.startsWith(word)))best=Math.max(best,weight+45);
+            else if(value.includes(word))best=Math.max(best,weight);
+            else {
+              const tokens=value.split(' ').filter(Boolean);
+              const near=tokens.some(token=>{
+                const maxDistance=word.length<=4?1:word.length<=7?2:3;
+                return Math.abs(token.length-word.length)<=maxDistance && distance(token,word)<=maxDistance;
+              });
+              if(near)best=Math.max(best,weight*0.55);
+            }
+          }
+          score+=best;
+        }
+
+        return {...item,score};
+      })
+      .filter(item=>item.score>0)
+      .sort((a,b)=>b.score-a.score);
   },[active,filters,query]);
 
-  const go = next => { setPage(next); setQuery(''); setFilters({group:'Все',level:'Все'}); setMenuOpen(false); window.scrollTo({top:0,behavior:'smooth'}); };
-  const changeTheme = () => { const next = theme==='night'?'day':'night'; setTheme(next); localStorage.setItem('wrestling-theme',next); };
+  const go=next=>{setPage(next);setQuery('');setFilters({group:'Все',level:'Все'});setMenuOpen(false);window.scrollTo({top:0,behavior:'smooth'});};
+  const changeTheme=()=>{const next=theme==='night'?'day':'night';setTheme(next);localStorage.setItem('wrestling-theme',next);};
 
   return <div className={`site ${theme}`}>
-    <header className="header">
-      <button className="logo" onClick={()=>go('главная')}><span>闘</span><b>WRESTLING</b><small>БОРЬБА · ТЕХНИКА · ТРЕНИРОВКИ</small></button>
-      <nav>{navItems.map(item=><button key={item} className={page===item?'active':''} onClick={()=>go(item)}>{item==='тренировки'?'Тренировки':item==='прогресс'?'Прогресс':categories.find(c=>c.id===item)?.title}</button>)}</nav>
-      <div className="headerTools"><button className="themeToggle" onClick={changeTheme} aria-label="Сменить тему">{theme==='night'?'☼':'☾'}</button><div className="favorites">★ {favorites.length}</div><button className="menuButton" onClick={()=>setMenuOpen(v=>!v)} aria-label="Открыть меню">{menuOpen?'×':'☰'}</button></div>
+    <aside className="sidebar">
+      <button className="brand" onClick={()=>go('главная')}><span>闘</span><b>W</b><small>WRESTLING</small></button>
+      <nav className="sideNav">
+        <button className={page==='главная'?'active':''} onClick={()=>go('главная')}><i>⌂</i><span>Главная</span></button>
+        {navItems.map(item=><button key={item} className={page===item?'active':''} onClick={()=>go(item)}><i>{item==='тренировки'?'◈':item==='прогресс'?'◒':'武'}</i><span>{item==='тренировки'?'Тренировки':item==='прогресс'?'Прогресс':categories.find(c=>c.id===item)?.title}</span></button>)}
+      </nav>
+      <div className="sideBottom">
+        <button onClick={changeTheme}>{theme==='night'?'☼':'☾'} <span>{theme==='night'?'День':'Ночь'}</span></button>
+        <div>★ {favorites.length}</div>
+      </div>
+    </aside>
+    <header className="mobileHeader">
+      <button className="mobileBrand" onClick={()=>go('главная')}><span>闘</span> WRESTLING</button>
+      <button onClick={changeTheme}>{theme==='night'?'☼':'☾'}</button>
+      <button onClick={()=>setMenuOpen(v=>!v)}>☰</button>
     </header>
-    {menuOpen && <div className="mobileMenu">{navItems.map(item=><button key={item} className={page===item?'active':''} onClick={()=>go(item)}>{item==='тренировки'?'Тренировки':item==='прогресс'?'Прогресс':categories.find(c=>c.id===item)?.title}</button>)}</div>}
+    {menuOpen&&<div className="mobileMenu">{['главная',...navItems].map(item=><button key={item} className={page===item?'active':''} onClick={()=>go(item)}>{item==='главная'?'Главная':item==='тренировки'?'Тренировки':item==='прогресс'?'Прогресс':categories.find(c=>c.id===item)?.title}</button>)}</div>}
 
-    {page==='главная' ? <Home go={go} theme={theme}/> : page==='тренировки' ? <Training completed={completed} toggleCompleted={key=>toggle(key,setCompleted,'wrestling-completed')} equipmentDone={equipmentDone} toggleEquipment={key=>toggle(key,setEquipmentDone,'wrestling-equipment')} readinessDone={readinessDone} toggleReadiness={key=>toggle(key,setReadinessDone,'wrestling-readiness')} /> : page==='прогресс' ? <Progress completed={completed} techCompleted={techCompleted} total={allTechniques.length} equipmentDone={equipmentDone} readinessDone={readinessDone} /> : <Catalog active={active} filters={filters} setFilters={setFilters} query={query} setQuery={setQuery} items={items} favorites={favorites} toggleFavorite={key=>toggle(key,setFavorites,'wrestling-favorites')} setSelected={setSelected} />}
-    {selected && <Modal item={selected} favorite={favorites.includes(selected.name)} techniqueDone={techCompleted.includes(selected.name)} toggleTechnique={()=>toggle(selected.name,setTechCompleted,'wrestling-tech-completed')} toggleFavorite={()=>toggle(selected.name,setFavorites,'wrestling-favorites')} onClose={()=>setSelected(null)} />}
-    <footer><span>WRESTLING</span><span>Техника • дисциплина • уважение</span><span>Тренируйся последовательно и безопасно.</span></footer>
-  </div>
+    {page==='главная'?<Home go={go}/>:page==='тренировки'?<Training completed={completed} toggleCompleted={key=>toggle(key,setCompleted,'wrestling-completed')} equipmentDone={equipmentDone} toggleEquipment={key=>toggle(key,setEquipmentDone,'wrestling-equipment')} readinessDone={readinessDone} toggleReadiness={key=>toggle(key,setReadinessDone,'wrestling-readiness')}/>:page==='прогресс'?<Progress completed={completed} techCompleted={techCompleted} total={allTechniques.length} equipmentDone={equipmentDone} readinessDone={readinessDone}/>:<Catalog active={active} filters={filters} setFilters={setFilters} query={query} setQuery={setQuery} items={items} favorites={favorites} toggleFavorite={key=>toggle(key,setFavorites,'wrestling-favorites')} setSelected={setSelected}/>}
+    {selected&&<Modal item={selected} favorite={favorites.includes(selected.name)} techniqueDone={techCompleted.includes(selected.name)} toggleTechnique={()=>toggle(selected.name,setTechCompleted,'wrestling-tech-completed')} toggleFavorite={()=>toggle(selected.name,setFavorites,'wrestling-favorites')} onClose={()=>setSelected(null)}/>}
+  </div>;
 }
 
-function Home({go,theme}){ return <main>
-  <section className="hero" style={{backgroundImage:`linear-gradient(90deg,rgba(4,7,13,.97) 0%,rgba(4,7,13,.84) 42%,rgba(4,7,13,.25) 75%,rgba(4,7,13,.35) 100%),url('/wrestling-japan.png')`}}>
-    <div className="hero-copy"><span className="eyebrow">WRESTLING / БОРЬБА</span><h1>Техника.<br/><em>Контроль.</em><br/>Движение.</h1><p>Общая база для борцовских дисциплин: универсальная стойка, проходы, броски, работа ногами, партер, ОФП и домашняя подготовка.</p><div className="actions"><button className="primary" onClick={()=>go('стойка')}>Открыть стойку →</button><button className="ghost" onClick={()=>go('тренировки')}>Домашняя тренировка</button></div></div>
-    <div className="hero-mark"><span>闘</span><b>WRESTLING</b><small>{theme==='night'?'夜':'昼'} · БОРЬБА</small></div>
-  </section>
-  <section className="sectionIntro"><div><span className="eyebrow">03 РАЗДЕЛА</span><h2>Всё начинается с движения.</h2></div><p>Три основных направления без лишнего: стойка, партер и ОФП. Внутри — большая библиотека техники, уровни сложности и практические тренировки.</p></section>
-  <section className="grid">{categories.map((c,i)=><button className="category" key={c.id} onClick={()=>go(c.id)}><small>0{i+1} · {c.jp}</small><h2>{c.title}</h2><p>{c.description}</p><strong>{c.groups.reduce((n,g)=>n+g.items.length,0)} приёмов и элементов</strong><b>↗</b></button>)}</section>
-  <section className="principles"><div><span className="eyebrow">ОСНОВА</span><h2>Универсальная стойка — общий старт.</h2><p>Нейтральная разножка, короткие шаги, баланс и изменение уровня подходят как фундамент для разных борцовских правил.</p></div><div className="list"><p><b>01</b> Стопы и баланс.</p><p><b>02</b> Перемещение без скрещивания.</p><p><b>03</b> Изменение уровня ногами.</p><p><b>04</b> Сначала позиция — потом атака.</p></div></section>
-  <section className="themePanel"><div><span className="eyebrow">ДВЕ ТЕМЫ</span><h2>Днём — рисовая бумага. Ночью — чернила и неон.</h2><p>Переключатель в шапке сохраняет выбранную тему.</p></div><div className="themePreview"><span>☼</span><span>☾</span></div></section>
-</main> }
+function Home({go}){
+  return <main className="content">
+    <section className="heroExact">
+      <div className="heroOverlay"/>
+      <div className="heroText">
+        <span className="kicker">01 / ОБЗОР</span>
+        <h1>Wrestling</h1>
+        <p>Техника, партер, ОФП, тренировки, прогресс и адаптация под экран.</p>
+        <div className="heroButtons"><button className="redBtn" onClick={()=>go('стойка')}>Открыть технику</button><button className="lightBtn" onClick={()=>go('тренировки')}>Домашняя тренировка</button></div>
+      </div>
+      <div className="heroVertical">柔道 · レスリング</div>
+    </section>
+    <section className="threeCols">
+      {categories.map((c,i)=><button key={c.id} className="sectionCard" onClick={()=>go(c.id)}>
+        <div className="sectionCardTop"><span>0{i+1}</span><b>{c.jp}</b></div><h2>{c.title}</h2><p>{c.description}</p><strong>{c.groups.reduce((n,g)=>n+g.items.length,0)} элементов</strong>
+      </button>)}
+    </section>
+    <section className="overviewGrid">
+      <article className="featureCard large"><span className="kicker">01 / СТАРТ</span><h2>Универсальная стойка</h2><p>Положение, перемещения, изменение уровня, проходы, броски, подсечки, подножки и зацепы.</p><button onClick={()=>go('стойка')}>Перейти →</button></article>
+      <article className="featureCard"><span className="kicker">02 / ПАРТЕР</span><h2>Работа на земле</h2><p>Позиции, перевороты, удержания, удушающие и болевые с контролем безопасности.</p><button onClick={()=>go('партер')}>Открыть →</button></article>
+      <article className="featureCard"><span className="kicker">03 / ОФП</span><h2>Подготовка</h2><p>База силы, выносливости, мобильности и работа с доступным оборудованием.</p><button onClick={()=>go('ОФП')}>Открыть →</button></article>
+    </section>
+    <section className="bottomGrid">
+      <article><span className="kicker">ДОМАШНЯЯ ТРЕНИРОВКА</span><h2>Три этапа дома</h2><p>База → связки → раунды. С понятным оборудованием и отметками прогресса.</p><button onClick={()=>go('тренировки')}>Начать →</button></article>
+      <article><span className="kicker">ПРОГРЕСС</span><h2>Смотри динамику</h2><p>Техника, тренировки, готовность и оборудование — в одном месте.</p><button onClick={()=>go('прогресс')}>Открыть →</button></article>
+      <article><span className="kicker">ЭКИПИРОВКА</span><h2>Минимальный набор</h2><p>Безопасное покрытие, резина, вода и то, что реально пригодится дома.</p><span className="verticalMark">技 · дисциплина · уважение</span></article>
+    </section>
+  </main>;
+}
 
-function Catalog({active,filters,setFilters,query,setQuery,items,favorites,toggleFavorite,setSelected}){ return <main><section className="pageHero"><div><span className="eyebrow">WRESTLING / {active.jp}</span><h1>{active.title}</h1><p>{active.description}</p></div><div className="stamp">闘<br/><small>{active.title}</small></div></section><section className="toolbar"><div className="search"><span>⌕</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Поиск техники, приёма, раздела…" /></div><div className="tabs"><button className={filters.group==='Все'?'active':''} onClick={()=>setFilters({...filters,group:'Все'})}>Все</button>{active.groups.map(g=><button key={g.id} className={filters.group===g.title?'active':''} onClick={()=>setFilters({...filters,group:g.title})}>{g.title}</button>)}</div><div className="levels">{levels.map(l=><button key={l} className={filters.level===l?'active':''} onClick={()=>setFilters({...filters,level:l})}>{l}</button>)}</div></section><div className="catalogHead"><div><span className="eyebrow">Каталог</span><h2>{items.length} элементов</h2></div><span className="catalogNote">Лёгкий · Средний · Продвинутый</span></div><section className="cards">{items.map((item,i)=><article className="card" key={item.name}><div className="visual"><span>{String(i+1).padStart(2,'0')}</span><b>{item.jp}</b><strong>闘</strong><em className={item.level}>{item.level}</em></div><div className="body"><small>{item.group} · {item.english}</small><h3>{item.name}</h3><p>{item.text}</p><div className="cardActions"><button onClick={()=>setSelected(item)}>Разбор →</button><a href={item.video} target="_blank" rel="noreferrer">▶ Видео</a><a href={item.image} target="_blank" rel="noreferrer">▧ Фото</a><button className={favorites.includes(item.name)?'fav on':'fav'} onClick={()=>toggleFavorite(item.name)}>{favorites.includes(item.name)?'★':'☆'}</button></div></div></article>)}</section></main> }
+function Catalog({active,filters,setFilters,query,setQuery,items,favorites,toggleFavorite,setSelected}){
+  return <main className="content">
+    <section className="pageTitle"><span className="kicker">WRESTLING / {active.jp}</span><h1>{active.title}</h1><p>{active.description}</p></section>
+    <section className="filters"><div className="search"><span>⌕</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Поиск техники…"/></div><div className="chips"><button className={filters.group==='Все'?'on':''} onClick={()=>setFilters({...filters,group:'Все'})}>Все</button>{active.groups.map(g=><button key={g.id} className={filters.group===g.title?'on':''} onClick={()=>setFilters({...filters,group:g.title})}>{g.title}</button>)}</div><div className="chips">{levels.map(l=><button key={l} className={filters.level===l?'on':''} onClick={()=>setFilters({...filters,level:l})}>{l}</button>)}</div></section>
+    {query && <div className="searchResultLine">Найдено: <b>{items.length}</b> · запрос: <span>{query}</span></div>}
+    <section className="catalogCards">{items.map((item,i)=><article className="techCard" key={item.name}><div className="techImage"><span>{String(i+1).padStart(2,'0')}</span><b>{item.jp}</b><strong>闘</strong><em>{item.level}</em></div><div className="techBody"><small>{item.group} · {item.english}</small><h2>{item.name}</h2><p>{item.text}</p><div><button onClick={()=>setSelected(item)}>Разбор</button><a href={item.video} target="_blank" rel="noreferrer">Видео</a><button className="fav" onClick={()=>toggleFavorite(item.name)}>{favorites.includes(item.name)?'★':'☆'}</button></div></div></article>)}</section>
+    {query && !items.length && <section className="emptySearch"><b>Ничего не найдено</b><p>Попробуй более короткий запрос, другое написание или выбери «Все» в фильтрах.</p></section>}
+  </main>;
+}
 
-function Modal({item,favorite,techniqueDone,toggleTechnique,toggleFavorite,onClose}){ return <div className="overlay" onClick={onClose}><div className="modal" onClick={e=>e.stopPropagation()}><button className="close" onClick={onClose}>×</button><div className="modalArt"><span>{item.jp}</span><strong>闘</strong><em>{item.level}</em></div><div className="modalBody"><span className="eyebrow">{item.group} · {item.english}</span><h2>{item.name}</h2><p className="lead">{item.text}</p><section className="lesson"><h4>Обучение</h4><p>{item.lesson}</p><ol><li>Сначала положение и движение без сопротивления.</li><li>Затем медленные качественные повторы.</li><li>После стабильной техники — лёгкое сопротивление.</li><li>Опасные броски, удушающие и болевые осваивай только с тренером и подготовленным партнёром.</li></ol></section><div className="warning">Безопасность: любой сигнал партнёра — немедленная остановка. Боль, головокружение или потеря контроля — повод прекратить упражнение.</div><div className="modalActions"><a className="primary" href={item.video} target="_blank" rel="noreferrer">Смотреть обучение →</a><a className="ghost" href={item.image} target="_blank" rel="noreferrer">Открыть фото →</a><button className="ghost" onClick={toggleTechnique}>{techniqueDone?'✓ Изучено':'○ Отметить изученным'}</button><button className="ghost" onClick={toggleFavorite}>{favorite?'★ В избранном':'☆ В избранное'}</button></div></div></div></div> }
-function Training({completed,toggleCompleted,equipmentDone,toggleEquipment,readinessDone,toggleReadiness}){ return <main><section className="pageHero"><div><span className="eyebrow">WRESTLING / ДОМА</span><h1>Тренировки</h1><p>Домашняя подготовка построена вокруг трёх этапов: база, связки и раунды. Каждый этап можно проходить в своём темпе.</p></div><div className="stamp">家<br/><small>ДОМ</small></div></section><section className="trainingGrid">{trainingStages.map(stage=><article className="trainingCard" key={stage.id}><span>0{stage.id}</span><h2>{stage.title}</h2><b>{stage.duration}</b><p>{stage.goal}</p><div className="stageEquipment"><small>Нужно для этапа</small><div>{stage.equipment.map(item=><span key={item}>{item}</span>)}</div></div><ul>{stage.blocks.map((block,i)=><li key={i}><button className={completed.includes(stage.id+':'+i)?'check done':'check'} onClick={()=>toggleCompleted(stage.id+':'+i)}>✓</button>{block}</li>)}</ul></article>)}</section><section className="homeSection"><div><span className="eyebrow">ГОТОВЫЕ ФОРМАТЫ</span><h2>Выбери тренировку под день</h2><p>Короткая — для занятых дней, стандартная — для регулярной работы, кондиционная — для подготовленного спортсмена.</p></div><div className="sessionGrid">{homeSessions.map(session=><article className="sessionCard" key={session.id}><small>Этап {session.stage}</small><h3>{session.title}</h3><b>{session.duration}</b><p>{session.description}</p><ul>{session.blocks.map((block,i)=><li key={i}>{block}</li>)}</ul></article>)}</div></section><section className="homeSection"><div><span className="eyebrow">ПЕРЕД ТРЕНИРОВКОЙ</span><h2>Проверь готовность</h2><p>Если хотя бы один базовый пункт не выполнен, сократи нагрузку или перенеси тренировку.</p></div><div className="checkGrid">{readiness.map((item,i)=><button key={i} className={readinessDone.includes(String(i))?'checkItem done':'checkItem'} onClick={()=>toggleReadiness(String(i))}><span>{readinessDone.includes(String(i))?'✓':'○'}</span>{item}</button>)}</div></section><section className="homeSection"><div><span className="eyebrow">ЭКИПИРОВКА</span><h2>Что необходимо дома</h2><p>Минимум — безопасное покрытие, пространство, резина и вода. Остальное расширяет варианты тренировок.</p></div><div className="equipmentGrid">{equipment.map(item=><article className={equipmentDone.includes(item.id)?'equipment done':'equipment'} key={item.id}><div><strong>{item.name}</strong><small>{item.required?'Необходимо':'По возможности'}</small></div><p>{item.detail}</p><button onClick={()=>toggleEquipment(item.id)}>{equipmentDone.includes(item.id)?'✓ Проверено':'Отметить'}</button></article>)}</div></section><section className="weekly"><span className="eyebrow">НЕДЕЛЯ</span><h2>Простой недельный ритм</h2><div className="weekGrid">{weeklyPlan.map(day=><article key={day.day}><b>{day.day}</b><h3>{day.title}</h3><p>{day.focus}</p></article>)}</div></section></main> }
-function Progress({completed,techCompleted,total,equipmentDone,readinessDone}){ const workoutTotal=trainingStages.reduce((n,s)=>n+s.blocks.length,0); const workoutPct=Math.min(100,Math.round(completed.length/Math.max(workoutTotal,1)*100)); const techPct=Math.min(100,Math.round(techCompleted.length/Math.max(total,1)*100)); const readinessPct=Math.round(readinessDone.length/readiness.length*100); const equipmentPct=Math.round(equipmentDone.length/equipment.length*100); return <main><section className="pageHero"><div><span className="eyebrow">WRESTLING / ПРОГРЕСС</span><h1>Прогресс</h1><p>Следи не только за количеством тренировок, но и за изученной техникой, готовностью и регулярностью.</p></div><div className="progressRing"><strong>{workoutPct}%</strong><small>домашний цикл</small></div></section><section className="progressStats"><article><strong>{workoutPct}%</strong><span>тренировки</span></article><article><strong>{techPct}%</strong><span>техника</span></article><article><strong>{readinessPct}%</strong><span>готовность</span></article><article><strong>{equipmentPct}%</strong><span>оборудование</span></article></section><section className="progressBox"><h2>Домашний цикл</h2><div className="bar"><span style={{width:`${workoutPct}%`}}></span></div><p>{completed.length} из {workoutTotal} пунктов отмечено</p></section><section className="progressBox"><h2>Изучение техники</h2><div className="bar"><span style={{width:`${techPct}%`}}></span></div><p>{techCompleted.length} из {total} элементов отмечено как изученные</p></section><section className="progressSteps">{progressSteps.map((step,i)=><article key={step.title}><span>0{i+1}</span><div><h2>{step.title}</h2><p>{step.text}</p></div></article>)}</section><section className="progressRules"><h2>Как повышать нагрузку</h2><div className="ruleGrid">{progressionRules.map(rule=><article key={rule.title}><h3>{rule.title}</h3><p>{rule.text}</p></article>)}</div></section></main> }
-export default App;
+function Modal({item,favorite,techniqueDone,toggleTechnique,toggleFavorite,onClose}){
+  return <div className="modalShade" onClick={onClose}><div className="modalExact" onClick={e=>e.stopPropagation()}><button className="modalClose" onClick={onClose}>×</button><div className="modalImage"><span>{item.jp}</span><strong>闘</strong></div><div className="modalText"><span className="kicker">{item.group} · {item.english}</span><h2>{item.name}</h2><p>{item.text}</p><div className="lessonBox"><b>ОБУЧЕНИЕ</b><p>{item.lesson}</p><ol><li>Сначала положение и движение без сопротивления.</li><li>Затем медленные качественные повторы.</li><li>После стабильной техники — лёгкое сопротивление.</li><li>Опасные элементы только с тренером и подготовленным партнёром.</li></ol></div><div className="modalActions"><a className="redBtn" href={item.video} target="_blank" rel="noreferrer">Смотреть обучение →</a><button onClick={toggleTechnique}>{techniqueDone?'✓ Изучено':'○ Отметить изученным'}</button><button onClick={toggleFavorite}>{favorite?'★ В избранном':'☆ В избранное'}</button></div></div></div></div>;
+}
+
+function Training({completed,toggleCompleted,equipmentDone,toggleEquipment,readinessDone,toggleReadiness}){
+  return <main className="content"><section className="pageTitle"><span className="kicker">WRESTLING / ДОМА</span><h1>Тренировки</h1><p>Три этапа дома: база, связки и раунды. Оборудование — только то, что реально использовать дома.</p></section><section className="trainingGrid">{trainingStages.map(stage=><article className="trainingCard" key={stage.id}><span className="step">0{stage.id}</span><h2>{stage.title}</h2><b>{stage.duration}</b><p>{stage.goal}</p><ul>{stage.blocks.map((block,i)=><li key={i}><button className={completed.includes(stage.id+':'+i)?'done':''} onClick={()=>toggleCompleted(stage.id+':'+i)}>✓</button>{block}</li>)}</ul></article>)}</section><section className="homeRows"><article><span className="kicker">ГОТОВНОСТЬ</span><h2>Перед тренировкой</h2><div className="checkGrid">{readiness.map((item,i)=><button key={i} className={readinessDone.includes(String(i))?'done':''} onClick={()=>toggleReadiness(String(i))}>{readinessDone.includes(String(i))?'✓':'○'} {item}</button>)}</div></article><article><span className="kicker">ЭКИПИРОВКА</span><h2>Что нужно дома</h2><div className="checkGrid">{equipment.map(item=><button key={item.id} className={equipmentDone.includes(item.id)?'done':''} onClick={()=>toggleEquipment(item.id)}>{equipmentDone.includes(item.id)?'✓':'○'} {item.name}</button>)}</div></article></section></main>;
+}
+
+function Progress({completed,techCompleted,total,equipmentDone,readinessDone}){
+  const workoutTotal=trainingStages.reduce((n,s)=>n+s.blocks.length,0);
+  const vals=[Math.min(100,Math.round(completed.length/Math.max(workoutTotal,1)*100)),Math.min(100,Math.round(techCompleted.length/Math.max(total,1)*100)),Math.round(readinessDone.length/readiness.length*100),Math.round(equipmentDone.length/equipment.length*100)];
+  return <main className="content"><section className="pageTitle"><span className="kicker">WRESTLING / ПРОГРЕСС</span><h1>Прогресс</h1><p>Следи за тренировками, изученной техникой, готовностью и регулярностью.</p></section><section className="progressGrid">{['Тренировки','Техника','Готовность','Оборудование'].map((x,i)=><article key={x}><strong>{vals[i]}%</strong><span>{x}</span><div><i style={{width:`${vals[i]}%`}}/></div></article>)}</section><section className="progressWide"><h2>Последовательность важнее скорости.</h2><p>Сначала качество движения и безопасность, затем объём и сопротивление.</p></section><section className="steps">{progressSteps.map((s,i)=><article key={s.title}><span>0{i+1}</span><div><h2>{s.title}</h2><p>{s.text}</p></div></article>)}</section></main>;
+}
